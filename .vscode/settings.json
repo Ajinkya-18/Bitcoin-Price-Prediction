@@ -1,0 +1,11 @@
+{
+    "files.autoSave": "afterDelay",
+    "editor.defaultFormatter": "ms-python.vscode-pylance",
+    "editor.acceptSuggestionOnEnter": "smart",
+    "editor.inlineSuggest.edits.showCollapsed": true,
+    "editor.quickSuggestions": {
+        "strings": "inline",
+        "comments": "inline"
+    },
+    "editor.quickSuggestionsDelay": 5
+}
