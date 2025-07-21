@@ -32,7 +32,7 @@ def load_data(data_path:str):
     
 #---------------------------------------------------------------------------------------------------------
 
-def preprocess_data(df):
+def preprocess_data(df, target:str='target', mode:str='train'):
     import numpy as np
 
     splitted = df['timestamp'].str.split(' ', expand=True)
@@ -44,17 +44,79 @@ def preprocess_data(df):
     df['month'] = splitted1[1].astype('int')
     df['day'] = splitted1[2].astype('int')
 
-    df.drop(['date', 'timestamp'], axis=1, inplace=True)
+    splitted2 = df['time'].str.split(':', expand=True)
+    df['hour'] = splitted2[0].astype('int')
+    df['minute'] = splitted2[1].astype('int')
+    
+    df['close-open'] = df['close'] - df['open']
+    df['high-low'] = df['high'] - df['low']
+    df['wick_length_high'] = df['high'] - df[['open', 'close']].max(axis=1)
+    df['wick_length_low'] = df[['open', 'close']].min(axis=1) - df['low']
+    df['buy_ratio'] = df['taker_buy_base_asset_volume'] / df['volume']
+    df['volume_delta'] = df['volume'] - df['volume'].shift(-1)
+    df['trade_activity_rate'] = df['number_of_trades'] / df['volume']
 
-    df['open-close'] = df['open'] - df['close']
-    df['low-high'] = df['low'] - df['high']
-    df['target'] = np.where(df['close'].shift(-1) > df['close'], 1, 0)
+    df.drop(['date', 'time', 'timestamp', 'open', 'high', 'low', 'year', 
+            'taker_buy_quote_asset_volume', 'quote_asset_volume', 'number_of_trades'], 
+            axis=1, inplace=True)
+    
+    df[target] = np.where(df['close'] > df['close'].shift(-1), 1, 0)
+    
+    del splitted, splitted1, splitted2
+    df = df.astype(np.float32)
 
-    return df
 
+    if mode=='train':
+        # Outliers removal
+        df = df.drop(df[df['close'] > 62000].index, axis=0)
+        df = df.drop(df[df['volume'] > 300].index, axis=0)
+        df = df.drop(df[df['taker_buy_base_asset_volume'] > 150].index, axis=0)
+        df = df.drop(df[(df['close-open'] > 100) | (df['close-open'] < -100)].index, axis=0)
+        df = df.drop(df[(df['high-low'] > 150)].index, axis=0)
+        df = df.drop(df[(df['wick_length_high'] > 50)].index, axis=0)
+        df = df.drop(df[(df['wick_length_low'] > 50)].index, axis=0)
+        df = df.drop(df[(df['volume_delta'] < -250) | (df['volume_delta'] > 250)].index, axis=0)
+        df = df.drop(df[df['trade_activity_rate'] > 150].index, axis=0)
 
+        x_train, x_test, y_train, y_test = split_data(df, target=target)
+
+        rfecv = load_model('models/rfecv_rfc.joblib')
+        scaler = load_model('models/rob_scaler.joblib')
+
+        x_train_new = rfecv.transform(x_train)
+        x_test_new = rfecv.transform(x_test)
+
+        x_train_new_scaled = scaler.transform(x_train_new)
+        x_test_new_scaled = scaler.transform(x_test_new)
+
+        return x_train_new_scaled, x_test_new_scaled, y_train, y_test
+    
+
+    if mode=='inference':
+        rfecv = load_model('models/rfecv_rfc.joblib')
+        scaler = load_model('models/rob_scaler.joblib')
+
+        df_new = rfecv.transform(df)
+        df_new_scaled = scaler.transform(df_new)
+
+        return df_new_scaled
 
 #---------------------------------------------------------------------------------------------------------
+
+def split_data(df, target:str):
+    try:
+        X, Y = df.drop([target], axis=1), df[target]
+
+        from sklearn.model_selection import train_test_split
+        x_train, x_test, y_train, y_test = train_test_split(X, Y, test_size=0.33, random_state=42)
+
+        return x_train, x_test, y_train, y_test
+    
+
+    except Exception as e:
+        raise e
+    
+#----------------------------------------------------------------------------------------------------------
 
 def save_model(model_instance, save_path:str):
     try:
